@@ -1,0 +1,19 @@
+{
+  "variant": "serial",
+  "input_dir": "data/input",
+  "output_dir": "data/output_serial",
+  "metrics": {
+    "images_processed": 20,
+    "total_pixels": 9600000,
+    "wall_time_sec": 0.937395771,
+    "cpu_user_time_sec": 0.736708000,
+    "cpu_system_time_sec": 0.033154000,
+    "avg_time_per_image_ms": 46.869789,
+    "avg_time_per_pixel_ns": 97.645393,
+    "cpu_cycles": 2447724951,
+    "cycles_per_image": 122386247.550,
+    "cycles_per_pixel": 254.971,
+    "max_width": 800,
+    "max_height": 600
+  }
+}

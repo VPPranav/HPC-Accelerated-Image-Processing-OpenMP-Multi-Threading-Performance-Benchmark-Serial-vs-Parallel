@@ -1,0 +1,47 @@
+{
+  "comparison": {
+    "speedup_wall_time": 4.846840,
+    "speedup_cpu_user": 0.473981,
+    "speedup_cpu_system": 0.222274,
+    "speedup_pixels_per_sec": 4.846840,
+    "parallel_efficiency": 0.302928,
+    "serial_pixels_per_sec": 10241138.585209,
+    "parallel_pixels_per_sec": 49637163.965308,
+    "serial_cpu_utilization": 0.821277,
+    "parallel_cpu_utilization": 8.807779,
+    "serial_est_total_cycles_all_threads": 2010261284,
+    "parallel_est_total_cycles_all_threads": 4448035775
+  },
+  "serial": {
+    "images_processed": 20,
+    "total_pixels": 9600000,
+    "wall_time_sec": 0.937395771,
+    "cpu_user_time_sec": 0.736708000,
+    "cpu_system_time_sec": 0.033154000,
+    "avg_time_per_image_ms": 46.869789,
+    "avg_time_per_pixel_ns": 97.645393,
+    "cpu_cycles_tsc": 2447724951,
+    "cycles_per_image_tsc": 122386247.550,
+    "cycles_per_pixel_tsc": 254.971,
+    "max_width": 800,
+    "max_height": 600
+  },
+  "parallel": {
+    "images_processed": 20,
+    "total_pixels": 9600000,
+    "wall_time_sec": 0.193403475,
+    "cpu_user_time_sec": 1.554297000,
+    "cpu_system_time_sec": 0.149158000,
+    "avg_time_per_image_ms": 9.670174,
+    "avg_time_per_pixel_ns": 20.146195,
+    "cpu_cycles_tsc": 505012211,
+    "cycles_per_image_tsc": 25250610.550,
+    "cycles_per_pixel_tsc": 52.605,
+    "estimated_total_cycles_all_threads": 4448035775,
+    "estimated_cycles_per_image_all_threads": 222401788.750,
+    "estimated_cycles_per_pixel_all_threads": 463.337,
+    "max_width": 800,
+    "max_height": 600,
+    "threads_used": 16
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "variant": "parallel",
+  "input_dir": "data/input",
+  "output_dir": "data/output_parallel",
+  "metrics": {
+    "images_processed": 20,
+    "total_pixels": 9600000,
+    "wall_time_sec": 0.193403475,
+    "cpu_user_time_sec": 1.554297000,
+    "cpu_system_time_sec": 0.149158000,
+    "avg_time_per_image_ms": 9.670174,
+    "avg_time_per_pixel_ns": 20.146195,
+    "cpu_cycles_tsc": 505012211,
+    "cycles_per_image_tsc": 25250610.550,
+    "cycles_per_pixel_tsc": 52.605,
+    "estimated_total_cycles_all_threads": 4448035775,
+    "estimated_cycles_per_image_all_threads": 222401788.750,
+    "estimated_cycles_per_pixel_all_threads": 463.337,
+    "max_width": 800,
+    "max_height": 600,
+    "threads_used": 16
+  }
+}
