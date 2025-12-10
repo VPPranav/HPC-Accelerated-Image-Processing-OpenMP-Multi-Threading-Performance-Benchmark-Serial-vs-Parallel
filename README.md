@@ -1,4 +1,3 @@
-````markdown
 # Efficient Image Processing with Multi-Threading: Performance Benchmarking using OpenMP (Serial vs Parallel)
 
 This project implements and compares **serial** and **parallel (OpenMP)** image-processing pipelines in C.  
@@ -435,4 +434,5 @@ It can serve as a teaching example for:
 * And practical use of stb single-header libraries in C.
 
 ```
+
 
