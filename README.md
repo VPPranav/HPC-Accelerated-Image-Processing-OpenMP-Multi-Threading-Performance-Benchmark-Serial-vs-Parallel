@@ -433,6 +433,3 @@ It can serve as a teaching example for:
 * Parallel programming with OpenMP,
 * And practical use of stb single-header libraries in C.
 
-```
-
-
