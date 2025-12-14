@@ -1,31 +1,49 @@
 # HPC-Accelerated Image Processing: OpenMP Multi-Threading Performance Benchmark (Serial vs Parallel)
 
-This project implements and compares **serial** and **parallel (OpenMP)** image-processing pipelines in C.  
-It processes a directory of images, applies a fixed sequence of filters, and records detailed **performance metrics** (wall-clock time, CPU time, and CPU cycles) for both versions. The results are exported as JSON files for further analysis and visualization.   
+This repository presents a **comprehensive High-Performance Computing (HPC) benchmarking framework** that evaluates the impact of **shared-memory parallelism using OpenMP** on a realistic, non-trivial **image processing workload implemented in C**. The project is designed to go beyond a minimal demo by combining **low-level systems programming**, **fine-grained performance instrumentation**, and a **web-based visualization layer** for intuitive analysis.
+
+At its core, the system processes a directory of images through a fixed pipeline of classical image-processing filters. Two functionally equivalent implementations are provided: a **serial single-threaded baseline** and a **parallel multi-threaded OpenMP version**. Both variants collect detailed performance metrics—including wall-clock time, CPU time, and cycle counts—which are exported as structured JSON logs. These logs are then consumed by a **Flask-based web dashboard** that enables interactive, real-time comparison of serial and parallel execution behavior.
 
 ---
 
 ![Class Diagram](diagrams/class_diagram.png)
 
+## Key Highlights
+
+* Native **C implementation** with minimal abstraction overhead
+* Identical serial and OpenMP-parallel pipelines for fair benchmarking
+* High-resolution timing and cycle-level measurements
+* Perf-like estimation of **total CPU cycles across all threads**
+* Structured JSON logging for reproducibility and post-processing
+* Full-stack integration with a **Flask + Chart.js analytics dashboard**
+* Clear separation between compute, measurement, and visualization layers
+
+---
+
 ## 1. Project Goals
 
-- Implement a simple but non-trivial **image processing workload**.
-- Provide two implementations of the same pipeline:
-  - `serial` – single-threaded baseline.
-  - `parallel` – multi-threaded using OpenMP.
-- Measure and compare:
-  - Wall-clock time.
-  - CPU user + system time.
-  - Raw TSC cycles.
-  - **Estimated total cycles across all threads** (perf-like metric).
-  - Throughput (pixels / second, images / second).
-  - Speedup and parallel efficiency.   
+The primary goals of this project are:
+
+* Implement a simple but non-trivial **image processing workload** suitable for performance studies
+* Provide two implementations of the same pipeline:
+
+  * **`serial`** – single-threaded baseline
+  * **`parallel`** – multi-threaded implementation using OpenMP
+* Measure and compare:
+
+  * Wall-clock execution time
+  * CPU user and system time
+  * Raw Time Stamp Counter (TSC) cycles
+  * **Estimated total cycles across all threads** (perf-style metric)
+  * Throughput (pixels/second, images/second)
+  * Speedup and parallel efficiency
+* Enable easier interpretation of results through **web-based visualization**
+
+The project is suitable for **HPC coursework, operating systems labs, parallel programming assignments, and performance engineering demonstrations**.
 
 ---
 
 ## 2. Directory Layout
-
-At the project root you have:
 
 ```text
 bin/        # Compiled binaries (serial, parallel)
@@ -45,9 +63,20 @@ src/
   timer.c, timer.h
   stb_image.h
   stb_image_write.h
-````
 
-> The `serial` and `parallel` programs default to `data/input` as the input directory and write into `data/output_serial` and `data/output_parallel` respectively. Directories are created automatically if missing.
+# Web application
+app.py
+templates/
+  index.html
+```
+
+The directory structure enforces a **clear separation of concerns**:
+
+* `src/` contains all performance-critical C/OpenMP code
+* `results/` stores experiment outputs and acts as a persistent benchmark log
+* The web application layer is **read-only** and never modifies benchmark results
+
+By default, both `serial` and `parallel` binaries read from `data/input` and write processed images to `data/output_serial` and `data/output_parallel` respectively. All required directories are created automatically if missing.
 
 ---
 
@@ -55,187 +84,223 @@ src/
 
 ## 3. Image Processing Pipeline
 
-All images are handled as interleaved 8-bit RGB buffers using a simple `Image` struct: 
+All images are handled as **interleaved 8-bit RGB buffers** using a minimal `Image` structure:
 
 ```c
 typedef struct {
     int width;
     int height;
-    int channels;      // always 3 (RGB) for our pipeline
+    int channels;      // always 3 (RGB)
     unsigned char *data;
 } Image;
 ```
 
+This representation keeps memory layout simple and cache-friendly, which is essential for meaningful performance measurements.
+
 ### 3.1 Loading and Saving Images
 
-* **Loading**: `load_image(const char *path)` (in `filters.c`) uses `stb_image.h` to load images from disk and **forces 3 RGB channels**, independent of the original format.
-* **Saving**: `save_image_png(const char *path, const Image *img)` uses `stb_image_write.h` to always save the processed result as PNG.
-* **Cleanup**: `free_image(Image *img)` frees both the pixel buffer and the struct.
+* **Loading**: `load_image(const char *path)` (defined in `filters.c`) uses `stb_image.h` to decode images and **forces all inputs to 3-channel RGB**, regardless of the original format.
+* **Saving**: `save_image_png(const char *path, const Image *img)` uses `stb_image_write.h` to store processed outputs as PNG files.
+* **Cleanup**: `free_image(Image *img)` releases both the pixel buffer and associated metadata.
 
-Supported input formats include PNG, JPEG, BMP and others that stb_image can decode. Input files are detected by their extension: `.png`, `.jpg`, `.jpeg`, `.bmp`.
+Supported input formats include PNG, JPEG, BMP, and other formats supported by `stb_image`. Non-image files are automatically ignored.
 
-### 3.2 Filters
+### 3.2 Filter Pipeline
 
-The pipeline applied to **every image** is:
+Each image is processed using the same fixed pipeline in both serial and parallel implementations:
 
-1. **Grayscale conversion** – `apply_grayscale(Image *img)`
+1. **Grayscale Conversion** (`apply_grayscale`)
 
-   * Uses a luminance formula per pixel: `0.299 * R + 0.587 * G + 0.114 * B`.
-   * The same gray value is written back into R, G, and B channels. 
+   * Computes luminance using the standard formula:
+     `0.299 * R + 0.587 * G + 0.114 * B`
+   * The resulting grayscale value is written back to all three RGB channels.
 
-2. **Box blur** – `apply_box_blur(Image *img, int radius)`
+2. **Box Blur** (`apply_box_blur`)
 
-   * Performs a **separable blur**:
+   * Implements a **separable blur** consisting of:
 
-     * Horizontal pass into a temporary buffer.
-     * Vertical pass back into the original image.
-   * For each pixel, averages all pixels in a sliding window of size `(2 * radius + 1)` along the current axis.
-   * Radius is currently fixed to `2` in both serial and parallel pipelines.
+     * A horizontal pass into a temporary buffer
+     * A vertical pass back into the original image
+   * Uses a sliding window of size `(2 × radius + 1)` along each axis
+   * The blur radius is fixed to `2` for all experiments
+   * This stage is particularly useful for studying **memory bandwidth and cache effects**
 
-3. **Sobel edge detection** – `apply_sobel_edge(Image *img)`
+3. **Sobel Edge Detection** (`apply_sobel_edge`)
 
-   * First converts RGB data into a temporary grayscale buffer.
-   * Applies classic 3×3 Sobel kernels `Gx` and `Gy` to compute gradient magnitude at each pixel:
-     `mag = sqrt(sumx² + sumy²)` clamped to `[0,255]`.
-   * Writes the edge magnitudes back into all three RGB channels. 
+   * Converts RGB data into a temporary grayscale buffer
+   * Applies classic 3×3 Sobel kernels (`Gx`, `Gy`) to compute gradient magnitude
+   * Magnitudes are clamped to `[0, 255]` and written back to all RGB channels
 
-These filters run **in-place** on the `Image` object.
+All filters operate **in-place**, avoiding repeated allocations and ensuring that performance measurements reflect computation and memory access rather than allocation overhead.
 
 ---
 
 ## 4. Serial Implementation (`serial.c`)
 
-The serial program:
+The serial program provides a **single-threaded baseline** against which all parallel results are compared. Its execution flow is as follows:
 
-1. Opens the input directory (`data/input` by default).
-2. Iterates through all entries; skips `"."`, `".."`, non-image files, etc.
+1. Opens the input directory (`data/input` by default)
+2. Iterates through all directory entries, skipping non-image files
 3. For each image:
 
-   * Constructs full input and output paths.
-   * Uses `load_image()` to read it.
-   * Updates counters:
+   * Constructs full input and output paths
+   * Loads the image using `load_image()`
+   * Updates global counters such as:
 
      * `images_processed`
      * `total_pixels`
      * `max_width`, `max_height`
-   * Applies the filters:
+   * Applies the full filter pipeline:
 
      ```c
      apply_grayscale(img);
      apply_box_blur(img, 2);
      apply_sobel_edge(img);
      ```
-   * Saves the processed result into `output_dir` using `save_image_png()`.
-4. Measures timings and CPU cycles for the *whole* run:
+   * Saves the processed image to the output directory
+4. Measures performance for the **entire run**, including:
 
-   * `wall_time()` from `timer.c` for elapsed wall time.
-   * `get_cpu_times()` for user and system CPU time.
-   * `read_tsc()` to read the Time Stamp Counter (TSC) on x86 (or a nanosecond clock on non-x86). 
-5. Computes metrics such as:
+   * Wall-clock time
+   * CPU user and system time
+   * Raw TSC cycle count
+5. Computes derived metrics such as:
 
-   * `avg_time_per_image_ms`
-   * `avg_time_per_pixel_ns`
-   * `cycles_per_image`
-   * `cycles_per_pixel` 
-6. Writes all metrics to `results/logs/serial_metrics.json`.
+   * Average time per image and per pixel
+   * Cycles per image and per pixel
+6. Writes all metrics to `results/logs/serial_metrics.json`
 
-The serial run also prints a concise summary to stdout.
+A concise summary is also printed to standard output for quick inspection.
 
 ---
 
 ## 5. Parallel Implementation (`parallel.c`)
 
-The parallel version is designed to do **exactly the same work** but in parallel using OpenMP.
+The parallel implementation performs **exactly the same logical work** as the serial version, but distributes images across multiple threads using OpenMP.
 
-### 5.1 Overview
+### 5.1 Execution Overview
 
-1. Collects all eligible image filenames into a dynamically-grown `char **files` array.
-2. Starts timers and reads TSC (same as serial).
-3. Runs an OpenMP `#pragma omp parallel for` loop over the index range `[0, file_count)`:
+1. Collects all valid image filenames into a dynamically allocated list
+2. Starts timing and cycle counters
+3. Executes an OpenMP `#pragma omp parallel for` loop over the image list
+4. Each iteration:
 
-   * Each iteration:
+   * Loads a single image
+   * Applies the identical filter pipeline
+   * Saves the processed result
+5. Uses OpenMP reduction clauses to safely aggregate:
 
-     * Builds input/output paths.
-     * Loads an image.
-     * Applies the same filters (grayscale → box blur(radius=2) → Sobel).
-     * Saves the image.
-   * Uses `reduction` clauses to safely accumulate:
-
-     * `total_pixels`
-     * `images_processed`
-     * `max_width`, `max_height` (with `reduction(max: ...)`).
-4. Stops timers and TSC; computes the same basic metrics as the serial program.
-5. Derives **additional perf-like metrics** for total cycles across all threads.
-6. Writes metrics to `results/logs/parallel_metrics.json` and, if possible, also writes `results/logs/compare_metrics.json` comparing serial vs parallel.
+   * Total pixels processed
+   * Number of images processed
+   * Maximum width and height
+6. Stops timers and computes the same base metrics as the serial version
+7. Derives **additional parallel-specific metrics**, including estimated total CPU cycles across all threads
+8. Writes results to `parallel_metrics.json` and generates `compare_metrics.json` if serial data is available
 
 ### 5.2 Perf-like Cycle Estimation
 
-Because the TSC is tied to wall time on a single core, it does **not** directly equal “total cycles used by all threads”. To approximate something similar to `perf stat -e cycles`, the code uses:
+Because the Time Stamp Counter reflects wall-clock cycles on a single core, it does not directly capture total CPU work in a multi-threaded run. To approximate a `perf stat`-style metric, the following estimate is used:
 
 ```text
 estimated_total_cycles_all_threads
-  ≈ cpu_cycles_TSC * (cpu_total_time_sec / wall_time_sec)
-
-where cpu_total_time_sec = cpu_user_time_sec + cpu_system_time_sec
+  ≈ cpu_cycles_TSC × (cpu_total_time_sec / wall_time_sec)
 ```
 
-From this estimate it computes:
+From this estimate, the code derives:
 
-* `estimated_cycles_per_image_all_threads`
-* `estimated_cycles_per_pixel_all_threads`
+* Estimated cycles per image (all threads)
+* Estimated cycles per pixel (all threads)
 
-These numbers provide a more realistic view of overall CPU consumption in parallel runs.
+These values provide a more realistic picture of **overall CPU consumption** during parallel execution.
 
-### 5.3 Comparison JSON
+### 5.3 Comparison Metrics
 
-If `results/logs/serial_metrics.json` exists (i.e., you have run `serial` at least once), the parallel program loads it and writes `results/logs/compare_metrics.json` including:
+If `serial_metrics.json` exists, the parallel program automatically generates `compare_metrics.json`, which includes:
 
-* `speedup_wall_time` – serial wall time / parallel wall time.
-* `speedup_cpu_user`, `speedup_cpu_system`.
-* `speedup_pixels_per_sec` – throughput speedup.
-* `parallel_efficiency` – `speedup_wall_time / threads_used`.
-* Pixels-per-second for both serial and parallel.
-* CPU utilization (CPU time / wall time) for both.
-* Estimated total cycles across all threads for serial and parallel.
+* Wall-time speedup
+* CPU-time speedups
+* Throughput speedup (pixels/second)
+* Parallel efficiency (`speedup / threads_used`)
+* CPU utilization for serial and parallel runs
+* Estimated total CPU cycles for both variants
 
 ---
 
 ## 6. Timing and Cycle Measurement (`timer.c`, `timer.h`)
 
-`timer.c` provides three functions:
+The timing module provides a unified interface for all measurements:
 
-* `double wall_time()`
+* `wall_time()` – high-resolution wall-clock time via `clock_gettime(CLOCK_MONOTONIC)`
+* `get_cpu_times()` – user and system CPU time via `getrusage(RUSAGE_SELF)`
+* `read_tsc()` – raw cycle count using `RDTSC` on x86, with a portable fallback on other architectures
 
-  * Uses `clock_gettime(CLOCK_MONOTONIC, ...)` to return high-resolution wall-clock time in seconds.
-
-* `void get_cpu_times(double *user_sec, double *sys_sec)`
-
-  * Uses `getrusage(RUSAGE_SELF, ...)` to obtain accumulated user and system CPU time in seconds.
-
-* `uint64_t read_tsc()`
-
-  * On x86/x86-64: executes the `RDTSC` instruction to read the Time Stamp Counter.
-  * On non-x86 platforms: falls back to a nanosecond-resolution monotonic clock and converts to a pseudo-cycle count. 
-
-These are used by both the serial and parallel binaries.
+Both serial and parallel binaries rely on this shared implementation to ensure **consistent measurement methodology**.
 
 ---
 
-## 7. Building the Project
+## 7. JSON Metrics Format
 
-### 7.1 Requirements
+All benchmark results are stored as structured JSON files for easy parsing and visualization.
 
-* POSIX-like environment (Linux/macOS or WSL).
-* C compiler (e.g., `gcc` or `clang`) with support for:
+### 7.1 Serial and Parallel Metrics
 
-  * C11 (or at least C99 features used here).
-  * OpenMP (`-fopenmp`) for the parallel version.
-* `make` (if you provide a Makefile).
-* `libm` (math library) for `sqrt` used in Sobel.
+Both `serial_metrics.json` and `parallel_metrics.json` share a common schema, with additional fields for the parallel case (e.g., thread count and estimated total cycles).
 
-### 7.2 Example Build Commands
+These files record:
 
-Assuming all sources live under `src/` and binaries go in `bin/`:
+* Input/output configuration
+* Raw timing and cycle counters
+* Derived averages and throughput metrics
+* Image and pixel statistics
+
+### 7.2 Comparison Metrics
+
+The `compare_metrics.json` file aggregates serial and parallel results into a single document, making it straightforward to generate plots or compare multiple runs across systems.
+
+---
+
+## 8. Web Application Architecture (Visualization Layer)
+
+To simplify analysis and presentation of benchmark results, the project includes a **Flask-based web application** that visualizes the generated JSON metrics.
+
+### 8.1 Flask Backend (`app.py`)
+
+The backend server:
+
+* Loads JSON metric files from `results/logs/`
+* Exposes REST-style API endpoints (`/api/serial`, `/api/parallel`, `/api/compare`)
+* Handles missing or incomplete data gracefully
+* Renders the main dashboard page
+
+No computation is performed at this layer; it remains fully decoupled from the C/OpenMP benchmarks.
+
+### 8.2 Frontend Dashboard (`templates/index.html`)
+
+The frontend provides a responsive, interactive dashboard built with HTML, CSS, JavaScript, and **Chart.js**. Key features include:
+
+* Automatic refresh to reflect newly generated benchmark results
+* Side-by-side comparison of serial and parallel performance
+* Visualizations for speedup, throughput, execution time, and CPU utilization
+* Clean separation between data fetching and presentation logic
+
+The overall data flow is:
+
+```text
+C Benchmarks → JSON Logs → Flask API → Browser → Interactive Charts
+```
+
+---
+
+## 9. Building the Project
+
+### 9.1 Requirements
+
+* POSIX-like environment (Linux, macOS, or WSL)
+* C compiler with C11 (or C99) support
+* OpenMP support (`-fopenmp`) for the parallel version
+* Math library (`-lm`) for Sobel filtering
+* Python 3.8+ and Flask (for the dashboard)
+
+### 9.2 Example Build Commands
 
 ```bash
 mkdir -p bin
@@ -245,192 +310,78 @@ gcc -O3 -Wall -std=c11 \
     src/serial.c src/filters.c src/timer.c \
     -o bin/serial -lm
 
-# Parallel (OpenMP)
+# Parallel
 gcc -O3 -Wall -std=c11 -fopenmp \
     src/parallel.c src/filters.c src/timer.c \
     -o bin/parallel -lm
 ```
 
-Notes:
+---
 
-* `filters.c` is the **only** translation unit that defines `STB_IMAGE_IMPLEMENTATION` and `STB_IMAGE_WRITE_IMPLEMENTATION`, so stb_image and stb_image_write are compiled only once.
-* If you create a `Makefile`, you can define convenient targets like `make serial`, `make parallel`, and `make all`.
+## 10. Running the Benchmarks
+
+1. Place input images into `data/input/`
+2. Run the serial version first:
+
+   ```bash
+   ./bin/serial
+   ```
+3. Run the parallel version:
+
+   ```bash
+   ./bin/parallel
+   ```
+
+Running the serial version first enables full comparison metrics to be generated during the parallel run.
 
 ---
 
-## 8. Running the Benchmarks
+## 11. Running the Web Dashboard
 
-### 8.1 Preparing Input Data
+```bash
+pip install flask
+python app.py
+```
 
-Place any `.png`, `.jpg`, `.jpeg` or `.bmp` images into:
+Open a browser and navigate to:
 
 ```text
-data/input/
+http://127.0.0.1:5000/
 ```
 
-The programs will ignore non-image files automatically.
-
-### 8.2 Serial Run
-
-```bash
-./bin/serial
-```
-
-Optional arguments:
-
-```bash
-./bin/serial <input_dir> <output_dir>
-# Example:
-./bin/serial data/input data/output_serial
-```
-
-Outputs:
-
-* Processed images written to `data/output_serial/`.
-* Metrics file: `results/logs/serial_metrics.json`.
-
-### 8.3 Parallel Run
-
-```bash
-./bin/parallel
-```
-
-Optional arguments:
-
-```bash
-./bin/parallel <input_dir> <output_dir>
-# Example:
-./bin/parallel data/input data/output_parallel
-```
-
-Outputs:
-
-* Processed images written to `data/output_parallel/`.
-* Metrics file: `results/logs/parallel_metrics.json`.
-* If `serial_metrics.json` exists, a comparison file `results/logs/compare_metrics.json` is also generated.
-
-> **Tip:** To get full comparison metrics, **always run `serial` first**, then `parallel`.
+The dashboard can remain running while benchmarks are re-executed, allowing live updates of performance data.
 
 ---
 
-## 9. JSON Metrics Format
+## 12. Extending the Project
 
-### 9.1 `serial_metrics.json` / `parallel_metrics.json`
+Potential extensions include:
 
-These files share the same structure (with extra fields for parallel):
-
-```jsonc
-{
-  "variant": "serial" | "parallel",
-  "input_dir": "data/input",
-  "output_dir": "data/output_serial or data/output_parallel",
-  "metrics": {
-    "images_processed": 42,
-    "total_pixels": 12345678,
-    "wall_time_sec": 0.123456789,
-    "cpu_user_time_sec": 0.120000000,
-    "cpu_system_time_sec": 0.003000000,
-    "avg_time_per_image_ms": 2.345678,
-    "avg_time_per_pixel_ns": 9.876543,
-    "cpu_cycles_tsc": 1234567890,
-    "cycles_per_image_tsc": 12345.678,
-    "cycles_per_pixel_tsc": 98.765,
-    "max_width": 1920,
-    "max_height": 1080,
-
-    // Only in parallel:
-    "estimated_total_cycles_all_threads": 1234567890,
-    "estimated_cycles_per_image_all_threads": 12345.678,
-    "estimated_cycles_per_pixel_all_threads": 98.765,
-    "threads_used": 8
-  }
-}
-```
-
-The actual values are produced at runtime; this is just the conceptual layout.
-
-### 9.2 `compare_metrics.json`
-
-Contains three top-level objects: `comparison`, `serial`, and `parallel`. The `comparison` section summarizes the speedups and utilization:
-
-```jsonc
-{
-  "comparison": {
-    "speedup_wall_time": ...,
-    "speedup_cpu_user": ...,
-    "speedup_cpu_system": ...,
-    "speedup_pixels_per_sec": ...,
-    "parallel_efficiency": ...,
-    "serial_pixels_per_sec": ...,
-    "parallel_pixels_per_sec": ...,
-    "serial_cpu_utilization": ...,
-    "parallel_cpu_utilization": ...,
-    "serial_est_total_cycles_all_threads": ...,
-    "parallel_est_total_cycles_all_threads": ...
-  },
-  "serial": { /* copy of serial metrics */ },
-  "parallel": { /* copy of parallel metrics + extra fields */ }
-}
-```
-
-These metrics make it easy to plot speedup curves or compare different hardware/compilers.
+* Adding new image filters or kernels
+* Making the pipeline configurable via command-line arguments
+* Experimenting with different OpenMP scheduling policies
+* Capturing hardware metadata (CPU model, cores, cache sizes)
+* Exporting results as reports (CSV/PDF)
 
 ---
 
-## 10. Extending the Project
+## 13. Third-Party Libraries and Licensing
 
-Here are some directions you can take this project further:
+* **stb_image.h** and **stb_image_write.h** (MIT/Public Domain)
+* **Flask** (BSD-style license)
+* **Chart.js** (MIT license)
 
-1. **Add new filters**
-
-   * Implement additional operations (Gaussian blur, sharpening, histogram equalization) in `filters.c`.
-   * Wire them into both `serial.c` and `parallel.c` to keep pipelines equivalent.
-
-2. **Configurable pipeline**
-
-   * Parse command-line flags or a config file to enable/disable specific filters or change blur radius.
-
-3. **Different scheduling strategies**
-
-   * Experiment with OpenMP schedule clauses (`static`, `dynamic`, `guided`) and chunk sizes to see how they affect performance.
-
-4. **Larger datasets & profiling**
-
-   * Benchmark on a large image set, collect multiple runs, and use the JSON logs to perform statistical analysis of performance.
-
-5. **Cross-platform support**
-
-   * Currently relies on POSIX APIs (`clock_gettime`, `getrusage`). For Windows you can provide alternate implementations in `timer.c`.
+All dependencies use permissive licenses suitable for academic and experimental use.
 
 ---
 
-## 11. Third-Party Libraries and Licensing
+## 14. Summary
 
-This project uses the following third-party libraries:
+This project delivers a **complete HPC benchmarking and visualization framework** that combines:
 
-* **stb_image.h** – single-header image loading library.
-* **stb_image_write.h** – single-header image writing library.
+* Low-level C/OpenMP systems programming
+* Accurate timing and cycle-level performance measurement
+* Structured JSON-based experiment logging
+* A modern web-based analytics dashboard
 
-Both libraries are provided under an **MIT or Public Domain dual license**, so you may choose whichever is more convenient. Their full license text is included at the end of each header.
-
-Your own project code can be licensed under any compatible license (MIT, BSD, GPL, etc.). Be sure to keep the stb license texts with the headers when redistributing.
-
----
-
-## 12. Summary
-
-In short, this project is a **self-contained benchmarking framework** for image processing in C:
-
-* Clear, reproducible pipeline (grayscale → blur → Sobel).
-* Direct comparison between serial and OpenMP parallel implementations.
-* Rich metrics (time, cycles, throughput, CPU utilization, estimated total cycles).
-* JSON logs ready for further analysis or plotting.
-
-It can serve as a teaching example for:
-
-* Basic digital image processing,
-* Performance measurement,
-* Parallel programming with OpenMP,
-* And practical use of stb single-header libraries in C.
-
-
+It serves as a strong reference implementation for studying **parallel performance, scalability, and efficiency on shared-memory systems**.
